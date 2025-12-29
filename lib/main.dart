@@ -9,11 +9,9 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-// --- MAIN ENTRY POINT ---
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize the background service
   await initializeService();
 
   runApp(const MyApp());
@@ -48,7 +46,7 @@ Future<void> initializeService() async {
       isForegroundMode: true,
       notificationChannelId: 'ble_foreground',
       initialNotificationTitle: 'BLE Service',
-      initialNotificationContent: 'Initializing...',
+      initialNotificationContent: 'Running',
       foregroundServiceNotificationId: 888,
     ),
     iosConfiguration: IosConfiguration(
@@ -59,7 +57,6 @@ Future<void> initializeService() async {
   );
 }
 
-// Entry point for the background isolate
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
@@ -73,7 +70,8 @@ void onStart(ServiceInstance service) async {
       service.setAsBackgroundService();
     });
 
-    // Handle notification content updates
+    // somehow this is not working though service works i.e. notification is not updated but app works
+
     service.on('updateContent').listen((event) {
       if (event != null && event['message'] != null) {
         if (service is AndroidServiceInstance) {
@@ -90,7 +88,6 @@ void onStart(ServiceInstance service) async {
     service.stopSelf();
   });
 
-  // Keep the isolate alive with periodic updates
   Timer.periodic(const Duration(seconds: 5), (timer) async {
     if (service is AndroidServiceInstance) {
       if (await service.isForegroundService()) {
@@ -98,19 +95,19 @@ void onStart(ServiceInstance service) async {
           title: "BLE Manager",
           content: "Maintaining connection...",
         );
-        // Service is running - you can add heartbeat logic here
       }
     }
   });
 }
 
+// for ios, just copied from docs, not necessary for android
 @pragma('vm:entry-point')
 bool onIosBackground(ServiceInstance service) {
   WidgetsFlutterBinding.ensureInitialized();
   return true;
 }
 
-// --- BLE LOGIC SINGLETON ---
+// ble logic
 class BLEManager extends ChangeNotifier {
   static final BLEManager _instance = BLEManager._internal();
   factory BLEManager() => _instance;
@@ -131,7 +128,6 @@ class BLEManager extends ChangeNotifier {
     connectionStatusNotifier.value = ConnectionStatus.connecting;
 
     try {
-      // Listen to connection state changes
       connectionStateSubscription?.cancel();
       connectionStateSubscription = device.connectionState.listen((state) {
         if (state == BluetoothConnectionState.disconnected) {
@@ -139,7 +135,6 @@ class BLEManager extends ChangeNotifier {
         }
       });
 
-      // Connect with autoConnect for background reconnection
       await device.connect(
         timeout: const Duration(seconds: 15),
         // autoConnect: true,
@@ -170,8 +165,6 @@ class BLEManager extends ChangeNotifier {
   Future<void> _discoverServices(BluetoothDevice device) async {
     try {
       List<BluetoothService> services = await device.discoverServices();
-
-      // Priority 1: Look for your specific service/characteristic
       for (var service in services) {
         String serviceUuid = service.uuid.toString().toUpperCase();
         if (serviceUuid.contains('ABF0') || serviceUuid.contains('0000ABF0')) {
@@ -185,7 +178,6 @@ class BLEManager extends ChangeNotifier {
         }
       }
 
-      // Priority 2: Find any notify/indicate characteristic
       for (var service in services) {
         for (var characteristic in service.characteristics) {
           if (characteristic.properties.notify ||
@@ -223,14 +215,11 @@ class BLEManager extends ChangeNotifier {
                 MessageData(message: message, timestamp: DateTime.now()),
               );
 
-              // Keep only last 100 messages to prevent memory issues
               if (currentMsgs.length > 100) {
                 currentMsgs.removeRange(100, currentMsgs.length);
               }
 
               messagesNotifier.value = currentMsgs;
-
-              // Update notification
               FlutterBackgroundService().invoke(
                 "updateContent",
                 {"message": message},
@@ -298,7 +287,7 @@ class BLEManager extends ChangeNotifier {
   }
 }
 
-// --- DATA MODELS ---
+// models
 class MessageData {
   final String message;
   final DateTime timestamp;
@@ -307,7 +296,7 @@ class MessageData {
 
 enum ConnectionStatus { disconnected, connecting, connected }
 
-// --- UI WIDGETS ---
+// UI stuff
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -381,27 +370,21 @@ class _BLEHomePageState extends State<BLEHomePage>
     });
 
     try {
-      // Cancel existing subscription
       _scanSubscription?.cancel();
 
-      // Start scanning
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: 15),
         androidUsesFineLocation: true,
       );
 
-      // Listen to scan results
       _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
         if (mounted) {
           setState(() {
             scanResults = results;
-            // Sort by signal strength
             scanResults.sort((a, b) => b.rssi.compareTo(a.rssi));
           });
         }
       });
-
-      // Wait for scan to complete
       await Future.delayed(const Duration(seconds: 15));
       await FlutterBluePlus.stopScan();
 
